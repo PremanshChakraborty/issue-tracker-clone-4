@@ -1,6 +1,8 @@
 name: Issue Tracker Cron
 
 on:
+  schedule:
+    - cron: '*/30 * * * *'
   workflow_dispatch:
 
 jobs:
