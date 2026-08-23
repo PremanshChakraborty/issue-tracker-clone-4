@@ -1,0 +1,11 @@
+{
+  "cron_interval_minutes": 30,
+  "digest_time": "00:00",
+  "quiet_hours_start": "22:00",
+  "quiet_hours_end": "07:00",
+  "timezone": "Asia/Kolkata",
+  "filter_bots": true,
+  "min_comment_length": 1,
+  "spike_comment_threshold": 5,
+  "default_mode": "inactivity_watch"
+}

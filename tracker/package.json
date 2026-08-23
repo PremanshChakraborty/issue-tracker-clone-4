@@ -1,0 +1,17 @@
+{
+  "name": "@issue-tracker/tracker",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@issue-tracker/types": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.8.3"
+  }
+}

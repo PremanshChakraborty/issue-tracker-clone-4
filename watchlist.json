@@ -1,0 +1,82 @@
+{
+  "issues": {
+    "PremanshChakraborty/issue_tracker_playground#1": {
+      "repo": "PremanshChakraborty/issue_tracker_playground",
+      "issue_number": 1,
+      "title": "issue 1",
+      "added_at": "2026-04-11T10:00:00Z",
+      "mode": "awaiting_reply",
+      "priority": "critical",
+      "inactivity_threshold_days": 3,
+      "stale_re_alert_days": 2,
+      "watch_users": [
+        "Author"
+      ],
+      "ignore_users": [],
+      "notify_on": [
+        "comments",
+        "closed",
+        "reopened",
+        "labeled",
+        "assigned",
+        "unassigned"
+      ],
+      "priority_bypass_quiet_hours": true,
+      "snooze_until": null,
+      "notes": "",
+      "auto_remove_on_close": true
+    },
+    "PremanshChakraborty/issue_tracker_playground#2": {
+      "repo": "PremanshChakraborty/issue_tracker_playground",
+      "issue_number": 2,
+      "title": "issue 2",
+      "added_at": "2026-04-11T10:00:00Z",
+      "mode": "inactivity_watch",
+      "priority": "watching",
+      "inactivity_threshold_days": 6,
+      "stale_re_alert_days": 2,
+      "watch_users": [
+        "ALL"
+      ],
+      "ignore_users": [],
+      "notify_on": [
+        "comments",
+        "closed",
+        "reopened",
+        "labeled",
+        "assigned",
+        "unassigned"
+      ],
+      "priority_bypass_quiet_hours": false,
+      "snooze_until": null,
+      "notes": "",
+      "auto_remove_on_close": true
+    },
+    "PremanshChakraborty/issue_tracker_playground#3": {
+      "repo": "PremanshChakraborty/issue_tracker_playground",
+      "issue_number": 3,
+      "title": "issue 3",
+      "added_at": "2026-04-11T10:00:00Z",
+      "mode": "wip_watch",
+      "priority": "low",
+      "inactivity_threshold_days": 6,
+      "stale_re_alert_days": 2,
+      "watch_users": [
+        "ALL"
+      ],
+      "ignore_users": [],
+      "notify_on": [
+        "comments",
+        "closed",
+        "reopened",
+        "labeled",
+        "assigned",
+        "unassigned"
+      ],
+      "priority_bypass_quiet_hours": false,
+      "snooze_until": null,
+      "notes": "",
+      "auto_remove_on_close": true
+    }
+  }
+}

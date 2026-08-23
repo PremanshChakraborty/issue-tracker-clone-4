@@ -1,0 +1,240 @@
+Smart GitHub Issue Tracker
+Project Context Document  —  For Claude Code
+1. Project Overview
+A personal utility tool for open source contributors. It monitors GitHub issues, detects meaningful events, and sends smart Telegram notifications. It is not designed as a shippable product — some manual setup is expected (PAT as repo secret, Telegram ID, etc.).
+
+Core principle: signal over noise. The tool should notify you when something actually matters for your contribution workflow, not for every GitHub event.
+
+2. Architecture
+2.1 Components
+•	GitHub repo as backend — stores all data as JSON files, no external database
+•	GitHub Actions cron job — runs every 30-60 minutes, fetches updates, sends notifications
+•	Telegram bot — delivery channel for all notifications, using user OAuth
+•	Web UI — single page for managing watchlist, settings, and viewing notification history as cards
+2.2 Repository File Structure
+watchlist.json      # issues being tracked + per-issue config
+settings.json       # global tool configuration
+state.json          # cron job state: last run timestamp, per-issue last-seen IDs
+notifications.json  # append-only log of all sent notifications (shown in UI)
+2.3 Web UI Behavior
+The UI is read-only in terms of GitHub — it reads from the repo JSON files only. It never calls the GitHub API directly. All GitHub API consumption happens exclusively in the cron job. The UI allows:
+•	Adding/removing issues from watchlist by pasting issue URL
+•	Setting mode and per-issue overrides
+•	Viewing notification history as cards (one card per issue, latest state)
+•	Snoozing issues, editing personal notes
+
+3. GitHub API Strategy
+3.1 Fetching Approach
+GitHub does not provide a batch endpoint to fetch multiple issues by ID in one call. However, you do not need one. The correct approach is to query at the repo level, not the issue level.
+•	GET /repos/{owner}/{repo}/issues/comments?since=<last_run_timestamp> — all new comments across all issues in a repo since last run
+•	GET /repos/{owner}/{repo}/issues/events?since=<last_run_timestamp> — all issue events (assignments, label changes, closures, reopens) since last run
+•	Then filter results client-side against your watchlist issue IDs
+
+This means: if you watch 10 issues across 3 repos, you make ~6 API calls total per cron run, not 30. Rate limits are not a concern — authenticated PAT allows 5000 requests/hour.
+3.2 Grouping Strategy
+Group watchlist issues by repo before fetching. One repo = one batch of API calls regardless of how many issues from that repo you are watching.
+
+4. The Three Modes
+Instead of asking users to configure 8 settings per issue, the tool asks one question: why are you watching this? The answer determines a full set of smart defaults. Users can still override any setting from the defaults.
+4.1 awaiting_reply
+You have commented on an issue asking for assignment or clarification. You are waiting for the maintainer or issue author to respond specifically to you.
+•	High urgency — instant notifications, critical priority
+•	Watches only specific people (issue author + maintainers), ignores other commenters
+•	Short inactivity threshold (3 days) — if no reply in 3 days, alert
+•	Auto-removes when the issue closes (your query was resolved or rejected)
+4.2 inactivity_watch
+An issue looks interesting but has been quiet. You are waiting for the right moment to jump in — when it goes stale enough that a new comment would be welcome.
+•	Low urgency — digest mode, watching priority
+•	Watches all activity (no user filter) to detect any sign of life
+•	Generous inactivity threshold (14 days) — most issues have natural quiet periods
+•	Does not auto-remove on close — you may want to monitor what closed it
+4.3 wip_watch
+Someone else is already assigned to the issue. You are monitoring to see if they drop it, go silent, or if the PR stalls — at which point you can step in.
+•	Lowest urgency — digest mode, low priority
+•	Watches the assigned user specifically for signs of stall
+•	Long inactivity threshold (21 days) — assignment does not mean immediate activity
+•	Auto-removes on close or PR merge — work is done, nothing to monitor
+
+5. Configurables
+5.1 Global Settings
+
+Setting	Description
+cron_interval_minutes	How often the cron job runs (e.g. 30, 60). Acts as natural notification cooldown.
+digest_mode	If true, all issue updates are bundled into one Telegram message per run instead of per-issue pings.
+digest_time	Time of day to send the digest message (used when digest_mode is on).
+quiet_hours_start	Notifications suppressed after this time (24h format, e.g. 23:00).
+quiet_hours_end	Notifications resume at this time (e.g. 07:00).
+filter_bots	Skip comments/events from known GitHub bots (Dependabot, Actions bot, etc.).
+min_comment_length	Skip comments shorter than N characters. Filters +1 and emoji reactions.
+default_mode	Fallback mode when adding an issue without specifying one.
+
+5.2 Per-Issue Settings
+
+Setting	Description
+mode	awaiting_reply | inactivity_watch | wip_watch. Determines default behavior.
+priority	critical | watching | low. Affects notification urgency and quiet hours bypass.
+inactivity_threshold_days	Alert if no activity on this issue for N days.
+stale_re_alert_days	Re-alert every N days if still inactive after the first inactivity alert.
+watch_users	Only notify when these GitHub usernames act on the issue. Empty = watch all.
+ignore_users	Never notify for actions from these usernames (bots, noise accounts).
+notify_on	Array of event types to track: comments, labels, status, assignment, pr_linked, pr_merged, reopened.
+digest_override	instant | digest. Overrides global digest_mode setting for this issue.
+priority_bypass_quiet_hours	If true and priority=critical, notifications ignore quiet hours.
+snooze_until	ISO timestamp. Suppress all notifications for this issue until this date.
+notes	Personal context note. Shown in UI card only, invisible to GitHub.
+auto_remove_on_close	Automatically remove this issue from watchlist when it closes.
+
+5.3 Mode Defaults
+These are the values automatically applied when a mode is selected. All can be overridden per issue.
+
+Setting	awaiting_reply	inactivity_watch	wip_watch
+priority	critical	watching	low
+inactivity_threshold_days	3	14	21
+stale_re_alert_days	2	7	10
+watch_users	Issue author + maintainers	(empty — watch all)	Assigned user
+notify_on	comments, status, assignment	comments, status, pr_linked	assignment, status, pr_merged, reopened
+digest_override	instant	digest	digest
+priority_bypass_quiet_hours	true	false	false
+auto_remove_on_close	true	false	true
+
+6. Notification Flow
+6.1 Cron Job Sequence
+•	Read watchlist.json, settings.json, state.json
+•	Check quiet hours — skip if within window (unless critical priority bypass applies)
+•	Group watchlist issues by repo
+•	For each unique repo: fetch new comments and events since last_run timestamp
+•	Filter results to only watched issue IDs
+•	For each watched issue:
+◦	Collect all new events/comments for this issue
+◦	Apply filters: bots, min comment length, watch_users, ignore_users
+◦	Detect mode-specific signals (see below)
+◦	Check activity spike: sudden comment velocity after long silence
+◦	Build notification object(s)
+•	Apply digest_override per issue: instant → send immediately, digest → queue
+•	If digest queue is not empty → bundle → send one Telegram message
+•	Append all sent notifications to notifications.json
+•	Update state.json: last_run timestamp, per-issue last-seen comment/event IDs
+•	Commit state.json and notifications.json back to repo
+6.2 Mode-Specific Signal Detection
+•	awaiting_reply: did any user in watch_users post a new comment?
+•	inactivity_watch: has time since last_activity_at exceeded inactivity_threshold_days? If already alerted, has stale_re_alert_days elapsed since last alert?
+•	wip_watch: did the assigned user go silent past threshold? Was the assignment dropped? Did a linked PR close without merge?
+6.3 Within-Run Deduplication (Non-Configurable)
+This is built-in behavior, not a user setting. If an issue receives 8 comments in one 30-minute window, the cron job sends ONE notification summarizing all 8, not 8 individual pings. The cron interval itself acts as the natural cooldown between runs.
+
+7. Notification Design
+7.1 Telegram — Instant (per issue)
+🔴 [awaiting_reply] nodejs/node#1234
+"Add support for X"
+↳ @maintainer commented 5 min ago
+↳ "Thanks, can you add tests for this?"
+→ View issue: https://github.com/...
+
+Each Telegram message must be self-contained — carry enough context to be actionable without the user needing to recall prior messages. Include: issue ref, issue title, mode badge, what happened, who acted, direct link.
+7.2 Telegram — Digest (bundled)
+📋 Daily Digest — 4 updates
+• nodejs/node#1234 — 3 new comments
+• facebook/react#5678 — closed ✅
+• vercel/next.js#910 — inactive 14d ⏰
+→ View all: https://your-ui-url
+7.3 Telegram Threading
+Use reply_to_message_id when sending a follow-up notification on the same issue. Store the last sent Telegram message ID per issue in state.json. This threads follow-up notifications as replies, giving the user prior context on tap without requiring statefulness.
+7.4 UI Cards
+The UI shows one card per issue. Cards are not event streams — they are living snapshots updated in place. Card contents:
+•	Issue title, repo, issue number, link
+•	Current mode badge and priority indicator
+•	Days since last activity
+•	Latest comment or event (summary)
+•	Personal note (if set)
+•	Snooze control and mode switcher
+•	Link to full notification history for this issue
+
+The UI reads exclusively from notifications.json and watchlist.json. It never calls the GitHub API.
+
+8. Data Schemas
+8.1 watchlist.json
+{
+  "issues": {
+    "nodejs/node#1234": {
+      "repo": "nodejs/node",
+      "issue_number": 1234,
+      "title": "Add support for X",
+      "added_at": "2024-01-01T00:00:00Z",
+      "mode": "awaiting_reply",
+      "priority": "critical",
+      "inactivity_threshold_days": 3,
+      "stale_re_alert_days": 2,
+      "watch_users": ["maintainer1", "repo-author"],
+      "ignore_users": [],
+      "notify_on": ["comments", "status", "assignment"],
+      "digest_override": "instant",
+      "priority_bypass_quiet_hours": true,
+      "snooze_until": null,
+      "notes": "Waiting for assignment approval",
+      "auto_remove_on_close": true
+    }
+  }
+}
+8.2 state.json
+{
+  "last_run": "2024-01-15T10:00:00Z",
+  "issues": {
+    "nodejs/node#1234": {
+      "last_comment_id": 198765432,
+      "last_event_id": 987654321,
+      "last_activity_at": "2024-01-10T08:00:00Z",
+      "inactivity_alerted": false,
+      "inactivity_last_alerted_at": null,
+      "last_telegram_message_id": 8842910
+    }
+  }
+}
+8.3 notifications.json
+Append-only log. Cap at ~500 entries or split into monthly files (e.g. notifications-2024-01.json) to prevent unbounded growth.
+[
+  {
+    "id": "uuid-v4",
+    "timestamp": "2024-01-15T10:00:00Z",
+    "issue_ref": "nodejs/node#1234",
+    "type": "comment | inactivity | status_change | spike | digest",
+    "mode_at_time": "awaiting_reply",
+    "priority_at_time": "critical",
+    "payload": {
+      "actor": "maintainer1",
+      "summary": "maintainer1 commented",
+      "detail": "Thanks, can you add tests?"
+    },
+    "delivered_to": "telegram",
+    "digest_id": null
+  }
+]
+digest_id links individual notifications that were bundled into one digest message, for UI grouping.
+
+9. Feature Priority
+Ranked by implementation priority. Build Tier 1 before anything else — the tool is not useful without them.
+
+Tier	Feature	Rationale
+Tier 1	Three auto-modes with smart defaults	Core insight of the tool. Without this it is just a notification relay.
+Tier 1	Inactivity detection with custom threshold	Primary use case. Surfaces opportunity to comment at the right time.
+Tier 1	Maintainer reply tracking (person-specific)	In awaiting_reply mode, only the maintainer's response matters. High signal.
+Tier 1	Digest vs instant notifications	Without this, a busy issue floods Telegram. Digest is critical for wip_watch.
+Tier 1	Bot comment filtering (global)	One-time setting, immediately improves signal quality. Very low effort.
+Tier 2	Priority tiers (critical/watching/low)	Connective tissue between modes and notification behavior.
+Tier 2	Snooze per issue	Silence without removing. Prevents users from deleting issues they still care about.
+Tier 2	Stale re-alert for critical issues	Closes the loop on inactivity — not just once, but ongoing nudges.
+Tier 2	Activity spike detection	Comment velocity check. Surfaces sudden opportunity on quiet issues.
+Tier 2	Auto-remove closed issues	Hygiene. Watchlists get stale fast.
+Tier 3	Quiet hours (global)	Nice to have. Telegram's own settings partially substitute.
+Tier 3	Minimum comment length filter	Useful but bot filtering handles most of this noise already.
+Tier 3	Personal notes per issue	Good for UI cards. Purely cosmetic in terms of tool intelligence.
+Tier 3	Re-open alert (always-on)	High signal but rare. Just ensure it is not accidentally filtered out.
+Tier 3	Auto-remove stale issues	Implement after snooze to avoid silently dropping watched issues.
+
+10. Required Setup
+This is a personal utility. Users need to:
+•	Fork or clone the repo
+•	Set GITHUB_PAT as a repository secret (for API calls)
+•	Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID as repository secrets
+•	Configure settings.json with their preferences
+•	Deploy the web UI (GitHub Pages or any static host) pointing to the repo JSON files
+•	The GitHub Actions cron job runs automatically once secrets are set

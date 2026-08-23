@@ -1,0 +1,42 @@
+name: Issue Tracker Cron
+
+on:
+  workflow_dispatch:
+
+jobs:
+  track:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run tracker
+        run: npm run start -w tracker
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+      - name: Commit updated state files (if changed)
+        run: |
+          git config user.name "issue-tracker[bot]"
+          git config user.email "noreply@github.com"
+          git diff --quiet && echo "No changes to commit." || (
+            git add state.json notifications.json watchlist.json &&
+            git commit -m "chore: update tracker state [skip ci]" &&
+            git push
+          )

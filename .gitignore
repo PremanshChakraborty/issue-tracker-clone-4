@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Build output
+tracker/dist/
+ui/dist/
+
+# Local env files
+.env
+.env.local
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+
+# UI — separate git repo
+issue-tracker-ui/
+
+graphify-out/
+.claude/
